@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PlaceHolder</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#09090b;color:#f4f4f5;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:inherit;text-decoration:none}
+.nav,main{width:min(980px,calc(100% - 32px));margin:auto}
+.nav{height:68px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #252529}
+.brand{font-size:18px;font-weight:750}
+.navlinks,.toolbar,.actions,.form-actions{display:flex;gap:8px;flex-wrap:wrap}
+.navlink{padding:8px 11px;border-radius:9px;color:#999}
+.navlink:hover{background:#17171a;color:#fff}
+main{padding:52px 0 80px}
+.eyebrow{color:#71717a;font-size:13px;font-weight:650;margin-bottom:10px}
+h1{font-size:clamp(32px,6vw,48px);line-height:1.05;letter-spacing:-2.3px;margin:0}
+h2{margin-top:35px}
+.sub{color:#8b8b93;margin:11px 0 28px}
+.toolbar{margin:28px 0 34px}
+.btn,button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;padding:9px 14px;border:1px solid #303035;border-radius:10px;background:#17171a;color:#f4f4f5;font:inherit;font-weight:550;cursor:pointer}
+.btn:hover,button:hover{background:#222226;border-color:#45454b}
+.primary{background:#f4f4f5;color:#101012;border-color:#f4f4f5}
+.primary:hover{background:#fff;border-color:#fff}
+.danger{color:#ff8585}
+.danger:hover{background:#241315;border-color:#542326}
+.list{border-top:1px solid #27272a}
+.item{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 2px;border-bottom:1px solid #27272a}
+.item:hover{background:#0f0f12}
+.itemmain{min-width:0}
+.itemtitle{font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.muted{color:#8b8b93}
+.card{background:#101012;border:1px solid #27272a;border-radius:14px;padding:22px;margin-top:22px}
+.cardtitle{font-weight:650}
+.empty{padding:28px 2px;color:#71717a}
+.dangerzone{border-color:#3a2022}
+input,textarea{width:100%;background:#111114;color:#f4f4f5;border:1px solid #303035;border-radius:10px;padding:12px;margin:7px 0 16px;font:inherit}
+textarea{min-height:105px;resize:vertical}
+input[type=file]{padding:9px}
+.urlbox{font:13px ui-monospace,Consolas,monospace}
+.flash{padding:11px 14px;background:#141416;border:1px solid #303035;border-radius:10px;margin-bottom:20px;color:#ddd}
+.badge{font-size:12px;color:#999;border:1px solid #303035;border-radius:999px;padding:3px 8px}
+.meta{display:grid;grid-template-columns:150px 1fr;gap:8px 18px}
+.meta div{padding:7px 0;border-bottom:1px solid #252529}
+@media(max-width:650px){
+.nav{height:60px}.navlinks .navlink:first-child{display:none}
+main{padding-top:38px}.item{align-items:stretch;flex-direction:column}
+.actions{width:100%}.actions .btn,.actions button,.toolbar .btn{flex:1}
+.meta{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<nav class="nav">
+<a class="brand" href="#/">PlaceHolder</a>
+<div class="navlinks">
+<a class="navlink" href="#/">Projeler</a>
+<a class="navlink" href="#/logout">Çıkış</a>
+</div>
+</nav>
+<main id="app"></main>
+
+<script>
+"use strict";
+
+/*
+  Flask sürümünün GitHub Pages karşılığı.
+
+  GitHub Pages sunucu çalıştırmadığı için:
+  - SQLite -> localStorage + IndexedDB
+  - Flask session -> localStorage
+  - uploads/ -> IndexedDB
+  - SHA-256 -> Web Crypto
+  - send_file -> Blob URL / indirme
+  - route'lar -> hash route'ları
+  - ngrok -> yok (GitHub Pages zaten HTTPS)
+
+  ÖNEMLİ: Bu sürüm tarayıcı tarafında çalışır. Veriler aynı tarayıcıda
+  tutulur; GitHub Pages'e SQLite/kişisel dosyalar yüklenmez.
+*/
+
+const DB_NAME="PlaceHolderDB", DB_VERSION=1, STORE="files";
+const PROJECTS_KEY="placeholder_projects";
+const LINKS_KEY="placeholder_links";
+const SHARES_KEY="placeholder_shares";
+const AUTH_KEY="placeholder_auth";
+
+/* Orijinal SITE_PASSWORD ortam değişkeninin yerini tutan tarayıcı ayarı.
+   Gerçek güvenlik için sunucu gerekir. */
+const SITE_PASSWORD="placeholder";
+
+const $=s=>document.querySelector(s);
+const app=$("#app");
+
+function uid(){
+  return crypto.randomUUID ? crypto.randomUUID() :
+    Date.now()+"-"+Math.random().toString(36).slice(2);
+}
+function load(k,d=[]){
+  try{return JSON.parse(localStorage.getItem(k)||JSON.stringify(d))}
+  catch{return d}
+}
+function save(k,v){localStorage.setItem(k,JSON.stringify(v))}
+function projects(){return load(PROJECTS_KEY)}
+function links(){return load(LINKS_KEY)}
+function shares(){return load(SHARES_KEY)}
+function auth(){return localStorage.getItem(AUTH_KEY)==="true"}
+
+function flash(msg){
+  app.insertAdjacentHTML("afterbegin",`<div class="flash">${esc(msg)}</div>`);
+}
+function esc(s){
+  return String(s??"").replace(/[&<>"']/g,m=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[m]));
+}
+function slugify(raw){
+  return (raw.toLowerCase()
+    .replace(/[^a-z0-9ğüşıöç_-]+/g,"-")
+    .replace(/-+/g,"-").replace(/^-|-$/g,"")) || "project";
+}
+function project(slug){return projects().find(p=>p.slug===slug)}
+function projectLinks(id){return links().filter(x=>x.project_id===id)}
+function icon(name){
+  const e=name.toLowerCase().split(".").pop();
+  if(["mp3","wav","ogg","flac"].includes(e))return "🎵";
+  if(["mp4","webm","mov","mkv"].includes(e))return "🎬";
+  if(["png","jpg","jpeg","gif","webp","svg"].includes(e))return "🖼️";
+  if(["zip","rar","7z"].includes(e))return "📦";
+  return "📄";
+}
+
+function openDB(){
+ return new Promise((resolve,reject)=>{
+  const r=indexedDB.open(DB_NAME,DB_VERSION);
+  r.onupgradeneeded=()=>r.result.createObjectStore(STORE,{keyPath:"id"});
+  r.onsuccess=()=>resolve(r.result);
+  r.onerror=()=>reject(r.error);
+ });
+}
+async function putFile(obj){
+ const db=await openDB();
+ return new Promise((res,rej)=>{
+  const tx=db.transaction(STORE,"readwrite");
+  tx.objectStore(STORE).put(obj);
+  tx.oncomplete=()=>res();
+  tx.onerror=()=>rej(tx.error);
+ });
+}
+async function getFile(id){
+ const db=await openDB();
+ return new Promise((res,rej)=>{
+  const r=db.transaction(STORE).objectStore(STORE).get(id);
+  r.onsuccess=()=>res(r.result);
+  r.onerror=()=>rej(r.error);
+ });
+}
+async function deleteStoredFile(id){
+ const db=await openDB();
+ return new Promise((res,rej)=>{
+  const tx=db.transaction(STORE,"readwrite");
+  tx.objectStore(STORE).delete(id);
+  tx.oncomplete=()=>res();
+  tx.onerror=()=>rej(tx.error);
+ });
+}
+async function allStoredFiles(projectId){
+ const db=await openDB();
+ return new Promise((res,rej)=>{
+  const r=db.transaction(STORE).objectStore(STORE).getAll();
+  r.onsuccess=()=>res(r.result.filter(x=>x.project_id===projectId));
+  r.onerror=()=>rej(r.error);
+ });
+}
+
+function page(title,body){
+ document.title=title+" — PlaceHolder";
+ app.innerHTML=body;
+}
+
+function login(){
+ page("Giriş",`
+ <div class="card" style="max-width:390px;margin:20vh auto">
+ <div class="brand">PlaceHolder</div>
+ <div class="muted">Devam etmek için giriş yap.</div>
+ <form id="loginForm">
+ <input id="password" type="password" placeholder="Şifre" autofocus required>
+ <button class="primary" style="width:100%">Devam et →</button>
+ </form>
+ </div>`);
+ $("#loginForm").onsubmit=e=>{
+   e.preventDefault();
+   if($("#password").value===SITE_PASSWORD){
+     localStorage.setItem(AUTH_KEY,"true"); route();
+   }else flash("Şifre yanlış.");
+ };
+}
+
+function home(){
+ const p=projects().sort((a,b)=>b.created_at.localeCompare(a.created_at));
+ page("Projeler",`
+ <div class="eyebrow">PlaceHolder</div>
+ <h1>Projelerin.</h1>
+ <div class="sub">Dosyalarını ve bağlantılarını tek yerde yönet.</div>
+ <div class="toolbar"><a class="btn primary" href="#/project/new">+ Yeni proje</a></div>
+ <div class="list">
+ ${p.length?p.map(x=>`
+ <div class="item">
+  <div class="itemmain">
+   <div class="itemtitle">${esc(x.name)}</div>
+   <div class="muted">/p/${esc(x.slug)}</div>
+  </div>
+  <div class="actions">
+   <a class="btn" href="#/p/${encodeURIComponent(x.slug)}">Aç →</a>
+   <a class="btn" href="#/p/${encodeURIComponent(x.slug)}/edit">Düzenle</a>
+  </div>
+ </div>`).join(""):`<div class="empty">Henüz proje yok.</div>`}
+ </div>`);
+}
+
+function newProject(){
+ page("Yeni proje",`
+ <div class="eyebrow">Yeni proje</div><h1>Proje oluştur.</h1>
+ <div class="sub">Dosyalarını ve bağlantılarını burada toplayabilirsin.</div>
+ <div class="card"><form id="newProject">
+ <input id="name" placeholder="Proje adı" required>
+ <input id="slug" placeholder="Link adı">
+ <textarea id="desc" placeholder="Açıklama (isteğe bağlı)"></textarea>
+ <div class="form-actions"><button class="primary">Oluştur →</button><a class="btn" href="#/">İptal</a></div>
+ </form></div>`);
+ $("#newProject").onsubmit=e=>{
+  e.preventDefault();
+  const name=$("#name").value.trim();
+  if(!name)return;
+  const slug=slugify($("#slug").value.trim()||name);
+  if(project(slug)){flash("Bu slug zaten kullanılıyor.");return}
+  const p={id:uid(),slug,name,description:$("#desc").value.trim(),created_at:new Date().toISOString()};
+  save(PROJECTS_KEY,[...projects(),p]);
+  location.hash="/p/"+encodeURIComponent(slug);
+ };
+}
+
+async function projectPage(slug){
+ const p=project(slug);
+ if(!p){notFound();return}
+ const fs=await allStoredFiles(p.id);
+ const ls=projectLinks(p.id);
+ const sh=shares().find(x=>x.project_id===p.id);
+
+ page(p.name,`
+ <div class="eyebrow">Proje</div>
+ <h1>${esc(p.name)}</h1>
+ ${p.description?`<div class="sub">${esc(p.description)}</div>`:""}
+ <div class="toolbar">
+  <a class="btn primary" href="#/p/${encodeURIComponent(p.slug)}/upload">+ Dosya</a>
+  <a class="btn" href="#/p/${encodeURIComponent(p.slug)}/link">+ Link</a>
+  <a class="btn" href="#/p/${encodeURIComponent(p.slug)}/edit">Düzenle</a>
+ </div>
+ <div class="list">
+ ${fs.map(f=>`
+ <div class="item">
+  <div class="itemmain">
+   <div class="itemtitle">${icon(f.name)} ${esc(f.path)}</div>
+   <div class="muted">${human(f.size)}</div>
+  </div>
+  <div class="actions">
+   <button class="btn open-file" data-id="${f.id}">Aç</button>
+   <a class="btn" href="#/p/${encodeURIComponent(p.slug)}/info/${encodeURIComponent(f.id)}">Bilgi</a>
+   <button class="danger delete-file" data-id="${f.id}">Sil</button>
+  </div>
+ </div>`).join("")}
+ ${ls.map(x=>`
+ <div class="item">
+  <div class="itemmain"><div class="itemtitle">🔗 ${esc(x.title)}</div><div class="muted">${esc(x.url)}</div></div>
+  <div class="actions"><button class="btn go-link" data-id="${x.id}">Aç</button><button class="danger delete-link" data-id="${x.id}">Sil</button></div>
+ </div>`).join("")}
+ ${!fs.length&&!ls.length?`<div class="empty">Henüz dosya veya link yok.</div>`:""}
+ </div>
+ <div class="card">
+  <div class="cardtitle">Public paylaşım</div>
+  <p class="muted">Bu GitHub Pages sürümünde public paylaşım tarayıcı tabanlıdır.</p>
+  ${sh?`
+   <input class="urlbox" readonly value="${esc(location.origin+location.pathname+"#/share/"+sh.token)}">
+   <button class="danger" id="deleteShare">Linki iptal et</button>
+  `:`<button class="primary" id="createShare">Public link oluştur</button>`}
+ </div>`);
+
+ document.querySelectorAll(".open-file").forEach(b=>b.onclick=()=>openStoredFile(b.dataset.id));
+ document.querySelectorAll(".delete-file").forEach(b=>b.onclick=async()=>{
+   if(!confirm("Dosya silinsin mi?"))return;
+   await deleteStoredFile(b.dataset.id); projectPage(slug);
+ });
+ document.querySelectorAll(".go-link").forEach(b=>b.onclick=()=>{
+   const x=links().find(x=>x.id===b.dataset.id); if(x)location.href=x.url;
+ });
+ document.querySelectorAll(".delete-link").forEach(b=>b.onclick=()=>{
+   save(LINKS_KEY,links().filter(x=>x.id!==b.dataset.id)); projectPage(slug);
+ });
+ if($("#createShare"))$("#createShare").onclick=()=>{
+   save(SHARES_KEY,[...shares(),{token:uid(),project_id:p.id,created_at:new Date().toISOString()}]);
+   projectPage(slug);
+ };
+ if($("#deleteShare"))$("#deleteShare").onclick=()=>{
+   save(SHARES_KEY,shares().filter(x=>x.project_id!==p.id));projectPage(slug);
+ };
+}
+
+function upload(slug){
+ const p=project(slug); if(!p){notFound();return}
+ page("Dosya yükle",`
+ <div class="eyebrow">Dosya</div><h1>Dosya yükle.</h1>
+ <div class="sub">${esc(p.name)}</div>
+ <div class="card"><form id="upload">
+ <input id="file" type="file" required>
+ <div class="form-actions"><button class="primary">Yükle ↑</button><a class="btn" href="#/p/${encodeURIComponent(slug)}">İptal</a></div>
+ </form></div>`);
+ $("#upload").onsubmit=async e=>{
+   e.preventDefault();
+   const f=$("#file").files[0]; if(!f)return;
+   const id=uid();
+   await putFile({id,project_id:p.id,path:f.name,name:f.name,size:f.size,type:f.type,lastModified:f.lastModified,blob:f});
+   location.hash="/p/"+encodeURIComponent(slug);
+ };
+}
+
+function addLink(slug){
+ const p=project(slug); if(!p){notFound();return}
+ page("Link ekle",`
+ <div class="eyebrow">Bağlantı</div><h1>Link ekle.</h1>
+ <div class="sub">Harici bir web adresini projene ekle.</div>
+ <div class="card"><form id="linkForm">
+ <input id="title" placeholder="Link adı" required>
+ <input id="url" type="url" placeholder="https://example.com/..." required>
+ <div class="form-actions"><button class="primary">Linki ekle →</button><a class="btn" href="#/p/${encodeURIComponent(slug)}">İptal</a></div>
+ </form></div>`);
+ $("#linkForm").onsubmit=e=>{
+  e.preventDefault();
+  const title=$("#title").value.trim(),url=$("#url").value.trim();
+  try{const u=new URL(url);if(!["http:","https:"].includes(u.protocol))throw 0}catch{flash("Geçersiz URL.");return}
+  save(LINKS_KEY,[...links(),{id:uid(),project_id:p.id,title,url,created_at:new Date().toISOString()}]);
+  location.hash="/p/"+encodeURIComponent(slug);
+ };
+}
+
+async function edit(slug){
+ const p=project(slug);if(!p){notFound();return}
+ page("Düzenle",`
+ <div class="eyebrow">Proje ayarları</div><h1>${esc(p.name)}</h1>
+ <div class="card"><form id="edit">
+ <input id="name" value="${esc(p.name)}" required>
+ <textarea id="desc">${esc(p.description||"")}</textarea>
+ <div class="form-actions"><button class="primary">Kaydet</button><a class="btn" href="#/p/${encodeURIComponent(slug)}">İptal</a></div>
+ </form></div>
+ <div class="card dangerzone">
+ <div class="cardtitle">Tehlikeli bölge</div>
+ <p class="muted">Proje ve tüm dosyaları silinir.</p>
+ <button class="danger" id="deleteProject">Projeyi sil</button>
+ </div>`);
+ $("#edit").onsubmit=e=>{
+  e.preventDefault();
+  const ps=projects(),i=ps.findIndex(x=>x.id===p.id);
+  ps[i].name=$("#name").value.trim();ps[i].description=$("#desc").value;
+  save(PROJECTS_KEY,ps);location.hash="/p/"+encodeURIComponent(slug);
+ };
+ $("#deleteProject").onclick=async()=>{
+  if(!confirm("Proje ve tüm dosyaları silinsin mi?"))return;
+  for(const f of await allStoredFiles(p.id))await deleteStoredFile(f.id);
+  save(PROJECTS_KEY,projects().filter(x=>x.id!==p.id));
+  save(LINKS_KEY,links().filter(x=>x.project_id!==p.id));
+  save(SHARES_KEY,shares().filter(x=>x.project_id!==p.id));
+  location.hash="/";
+ };
+}
+
+async function info(slug,id){
+ const p=project(slug),f=await getFile(id);
+ if(!p||!f){notFound();return}
+ const hash=await sha256(f.blob);
+ page("Bilgi",`
+ <div class="eyebrow">Dosya bilgisi</div><h1>${esc(f.name)}</h1>
+ <div class="card"><div class="meta">
+ <div>Ad</div><div>${esc(f.name)}</div>
+ <div>Uzantı</div><div>${esc(ext(f.name))}</div>
+ <div>MIME</div><div>${esc(f.type||"application/octet-stream")}</div>
+ <div>Boyut</div><div>${human(f.size)}</div>
+ <div>SHA-256</div><div style="word-break:break-all">${hash}</div>
+ </div></div>
+ <div class="toolbar"><a class="btn" href="#/p/${encodeURIComponent(slug)}">← Geri</a><button class="primary" id="open">Aç</button></div>`);
+ $("#open").onclick=()=>openStoredFile(id);
+}
+
+async function openStoredFile(id){
+ const f=await getFile(id);if(!f)return;
+ const url=URL.createObjectURL(f.blob);
+ window.open(url,"_blank");
+ setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
+
+async function publicShare(token){
+ const s=shares().find(x=>x.token===token);
+ if(!s){notFound();return}
+ const p=projectById(s.project_id);if(!p){notFound();return}
+ const fs=await allStoredFiles(p.id),ls=projectLinks(p.id);
+ page("Public paylaşım",`
+ <div class="eyebrow">PlaceHolder · Public paylaşım</div>
+ <h1>${esc(p.name)}</h1>
+ ${p.description?`<div class="sub">${esc(p.description)}</div>`:""}
+ <div class="list">
+ ${fs.map(f=>`<div class="item"><div class="itemmain"><div class="itemtitle">${icon(f.name)} ${esc(f.path)}</div><div class="muted">${human(f.size)}</div></div><button class="btn public-file" data-id="${f.id}">Aç →</button></div>`).join("")}
+ ${ls.map(x=>`<div class="item"><div class="itemmain"><div class="itemtitle">🔗 ${esc(x.title)}</div><div class="muted">${esc(x.url)}</div></div><button class="btn public-link" data-id="${x.id}">Aç →</button></div>`).join("")}
+ ${!fs.length&&!ls.length?`<div class="empty">Bu projede henüz paylaşılacak içerik yok.</div>`:""}
+ </div>`);
+ document.querySelectorAll(".public-file").forEach(b=>b.onclick=()=>openStoredFile(b.dataset.id));
+ document.querySelectorAll(".public-link").forEach(b=>b.onclick=()=>{
+   const x=links().find(x=>x.id===b.dataset.id);if(x)location.href=x.url;
+ });
+}
+
+function projectById(id){return projects().find(x=>x.id===id)}
+function ext(n){const i=n.lastIndexOf(".");return i>=0?n.slice(i).toLowerCase():""}
+function human(n){
+ for(const u of ["B","KB","MB","GB","TB"]){if(n<1024)return n.toFixed(1)+" "+u;n/=1024}
+ return n.toFixed(1)+" PB";
+}
+async function sha256(blob){
+ const buf=await blob.arrayBuffer(),hash=await crypto.subtle.digest("SHA-256",buf);
+ return [...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+function notFound(){page("404",`<h1>404</h1><div class="sub">İstenen içerik bulunamadı.</div><a class="btn" href="#/">Ana sayfa</a>`)}
+function logout(){localStorage.removeItem(AUTH_KEY);location.hash="/login"}
+
+async function route(){
+ let h=location.hash.replace(/^#/,"")||"/";
+ if(h==="/logout"){logout();return}
+ if(!auth()&&!h.startsWith("/share/")){login();return}
+ if(h==="/login"){login();return}
+ if(h==="/"){home();return}
+ if(h==="/project/new"){newProject();return}
+ let m=h.match(/^\/share\/([^/]+)$/);if(m){await publicShare(decodeURIComponent(m[1]));return}
+ m=h.match(/^\/p\/([^/]+)\/upload$/);if(m){upload(decodeURIComponent(m[1]));return}
+ m=h.match(/^\/p\/([^/]+)\/link$/);if(m){addLink(decodeURIComponent(m[1]));return}
+ m=h.match(/^\/p\/([^/]+)\/edit$/);if(m){await edit(decodeURIComponent(m[1]));return}
+ m=h.match(/^\/p\/([^/]+)\/info\/([^/]+)$/);if(m){await info(decodeURIComponent(m[1]),decodeURIComponent(m[2]));return}
+ m=h.match(/^\/p\/([^/]+)$/);if(m){await projectPage(decodeURIComponent(m[1]));return}
+ notFound();
+}
+window.addEventListener("hashchange",route);
+route();
+</script>
+</body>
+</html>
