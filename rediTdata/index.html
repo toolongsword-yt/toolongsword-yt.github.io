@@ -7,7 +7,7 @@
   const id = new URLSearchParams(location.search).get('d');
   if (!id) return document.body.textContent = 'Usage: ?d=<line-number>';
 
-  const res = await fetch('../data.txt');
+  const res = await fetch('data.txt');
   const lines = (await res.text()).split('\n').filter(l => l.trim());
   const uri = lines[+id];
 
