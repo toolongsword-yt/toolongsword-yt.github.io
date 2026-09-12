@@ -10,10 +10,21 @@
   const res = await fetch('data.txt');
   const lines = (await res.text()).split('\n').filter(l => l.trim());
   const uri = lines[+id];
-
   if (!uri) return document.body.textContent = 'Not found: ' + id;
-  window.location.href = uri;
+
+  // data URI → Blob URL (Chrome'da çalışır)
+  const [header, data] = uri.split(',');
+  const mime = header.match(/data:([^;]+)/)?.[1] || 'application/octet-stream';
+  const isBase64 = header.includes('base64');
+  const bytes = isBase64
+    ? atob(data)
+    : decodeURIComponent(data);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+
+  const blobUrl = URL.createObjectURL(new Blob([arr], { type: mime }));
+  window.location.replace(blobUrl);
 })();
 </script>
 </body>
-</html>   
+</html>
